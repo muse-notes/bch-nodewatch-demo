@@ -247,7 +247,12 @@ function renderDeployState() {
   const banner = $('deploy-banner');
   const hasContract = Boolean(c.contractAddress);
   const hasCategory = Boolean(c.registryCategoryId);
-  if (hasContract && hasCategory) {
+  // deployed:false (or broadcastPending) means the address/category are only
+  // expected future values — the txs are signed offline, nothing is on-chain.
+  // Never call it deployed on address/category alone (bug found 2026-11-08:
+  // the live page showed "deployed on chipnet" with deployed:false).
+  const isDeployed = c.deployed === true && !c.broadcastPending && hasContract && hasCategory;
+  if (isDeployed) {
     banner.classList.add('live');
     banner.innerHTML = `<b>Registry status: deployed on ${esc(c.network || state.network)}.</b> ` +
       `<span class="muted">Contract <span class="mono">${esc(c.contractAddress)}</span> · ` +
@@ -261,7 +266,11 @@ function renderDeployState() {
       !hasContract && 'contract address',
       !hasCategory && 'registry category ID',
     ].filter(Boolean).join(' and ');
-    $('deploy-detail').textContent = `Not deployed yet — still missing: ${missing}. ` +
+    const reason = missing
+      ? `still missing: ${missing}`
+      : 'contract + category are in config.json only as expected values — the three txs are signed offline and broadcast is still pending, nothing is on-chain yet';
+    const detail = $('deploy-detail');
+    if (detail) detail.textContent = `Not deployed yet — ${reason}. ` +
       'The registry table and the on-chain register button stay disabled until the contract is deployed ' +
       'and frontend/config.json carries the real values. Nothing here is faked.';
     $('registry-cat').textContent = 'not deployed yet';
@@ -479,7 +488,7 @@ function parseNwatchOpReturn(lockHex) {
 
 async function refreshNodes() {
   const body = $('nodes-body');
-  if (!state.config.registryCategoryId) {
+  if (!state.config.deployed || !state.config.registryCategoryId) {
     // renderDeployState already wrote the honest empty state.
     return;
   }
@@ -660,7 +669,7 @@ async function connectWallet() {
     $('connect-btn').disabled = true;
     $('disconnect-btn').disabled = false;
     $('attest-btn').disabled = false;
-    if (!state.config.registryCategoryId) $('form-msg').textContent = 'Wallet connected, but the contract is not deployed yet — registration stays disabled.';
+    if (!state.config.deployed || !state.config.registryCategoryId) $('form-msg').textContent = 'Wallet connected, but the contract is not deployed yet — registration stays disabled.';
     else $('form-msg').textContent = 'Wallet connected — ready to register.';
   } catch (e) {
     status.textContent = 'Connect failed: ' + (e.message || e);
@@ -791,7 +800,7 @@ async function loadArtifact() {
 async function registerNode(ev) {
   ev.preventDefault();
   const msg = $('form-msg');
-  if (!state.config.contractAddress || !state.config.registryCategoryId) {
+  if (!state.config.deployed || !state.config.contractAddress || !state.config.registryCategoryId) {
     msg.textContent = 'Contract not deployed yet — nothing to write to.';
     return;
   }
